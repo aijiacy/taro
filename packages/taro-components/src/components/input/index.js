@@ -4,26 +4,16 @@ import classNames from 'classnames'
 
 import './index.scss'
 
-const types = {
-  text: 'text',
-  number: 'number',
-  idcard: 'idcard',
-  digit: 'digit',
-  password: 'password',
-  file: 'file'
-}
-function parseType (type, isPassword, confirmType) {
-  if (!types[type]) {
+function getTrueType (type, confirmType, password) {
+  if (!type) {
     throw new Error('unexpected type')
   }
-  if (isPassword) {
-    return isPassword ? 'password' : 'text'
-  } else if (confirmType) {
-    return 'search'
-  } else {
-    return types[type]
-  }
+  if (confirmType === 'search') type = 'search'
+  if (password) type = 'password'
+
+  return type
 }
+
 class Input extends Nerv.Component {
   constructor () {
     super(...arguments)
@@ -100,7 +90,7 @@ class Input extends Nerv.Component {
         onInput={this.onInput}
         onFocus={this.onFocus}
         onBlur={this.onBlur}
-        type={parseType(type, password, confirmType)}
+        type={getTrueType(type, confirmType, password)}
       />
     )
   }
