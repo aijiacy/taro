@@ -77,7 +77,8 @@ exports.BUILD_TYPES = {
   WEAPP: 'weapp',
   H5: 'h5',
   RN: 'rn',
-  UI: 'ui'
+  UI: 'ui',
+  QUICKAPP: 'quickapp'
 }
 
 exports.PROJECT_CONFIG = 'config/index.js'
