@@ -563,10 +563,10 @@ export class RenderParser {
       const jsxElementPath = path.parentPath.parentPath
       if (t.isJSXIdentifier(name) && jsxElementPath.isJSXElement()) {
         const componentName = (jsxElementPath.node.openingElement as any).name.name
-        if (THIRD_PARTY_COMPONENTS.has(componentName as string)) {
-          return
-        }
         if (name.name === 'key') {
+          if (THIRD_PARTY_COMPONENTS.has(componentName as string)) {
+            return
+          }
           const jsx = path.findParent(p => p.isJSXElement())
           const loopBlock = jsx.findParent(p => {
             if (p.isJSXElement()) {
@@ -590,14 +590,15 @@ export class RenderParser {
           name.name.startsWith('on')
         ) {
           if (t.isJSXExpressionContainer(value)) {
-            let methodName = findMethodName(value.expression)
+            const methodName = findMethodName(value.expression)
+            methodName && this.usedEvents.add(methodName)
             if (this.methods.has(methodName)) {
               const method = this.methods.get(methodName)
-              if (method && t.isIdentifier(method.node.key)) {
-                this.usedEvents.add(methodName)
-              } else if (method === null) {
-                this.usedEvents.add(methodName)
-              }
+              // if (method && t.isIdentifier(method.node.key)) {
+              //   this.usedEvents.add(methodName)
+              // } else if (method === null) {
+              //   this.usedEvents.add(methodName)
+              // }
               if (!generate(value.expression).code.includes('.bind')) {
                 path.node.value = t.stringLiteral(`${methodName}`)
               }
@@ -708,6 +709,12 @@ export class RenderParser {
   }
 
   private visitors: Visitor = {
+    JSXEmptyExpression (path) {
+      const parent = path.parentPath
+      if (path.parentPath.isJSXExpressionContainer()) {
+        parent.remove()
+      }
+    },
     NullLiteral (path) {
       const statementParent = path.getStatementParent()
       if (statementParent && statementParent.isReturnStatement() && !t.isBinaryExpression(path.parent) && !isChildrenOfJSXAttr(path)) {
@@ -796,7 +803,7 @@ export class RenderParser {
     if (arrayMap && arrayMap.isCallExpression()) {
       this.loopRefIdentifiers.set(id.name, arrayMap)
     } else {
-      this.referencedIdentifiers.add(id)
+      id && this.referencedIdentifiers.add(id)
     }
   }
 

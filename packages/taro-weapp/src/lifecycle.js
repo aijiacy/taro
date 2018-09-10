@@ -16,7 +16,7 @@ export function updateComponent (component) {
     component._disable = false
   }
   // 在willMount前执行构造函数的副本
-  if (!component.__mounted) {
+  if (!component.__componentWillMountTriggered) {
     component._constructor && component._constructor(props)
   }
   let state = component.getState()
@@ -53,7 +53,8 @@ function doUpdate (component) {
   const { state, props = {} } = component
   let data = state || {}
   if (component._createData) {
-    data = component._createData(state, props)
+    // 返回null或undefined则保持不变
+    data = component._createData(state, props) || data
   }
   let privatePropKeyVal = component.$scope.data[privatePropKeyName] || false
 
@@ -84,11 +85,6 @@ function doUpdate (component) {
       while (component._pendingCallbacks.length) {
         component._pendingCallbacks.pop().call(component)
       }
-    }
-    if (!component.__mounted) {
-      component.__mounted = true
-      componentTrigger(component, 'componentDidMount')
-      componentTrigger(component, 'componentDidShow')
     }
   })
 }

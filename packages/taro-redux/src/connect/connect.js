@@ -23,7 +23,7 @@ export default function connect (mapStateToProps, mapDispatchToProps) {
 
   const stateListener = function () {
     let isChanged = false
-    const newMapState = mapStateToProps(store.getState())
+    const newMapState = mapStateToProps(store.getState(), this.props)
     Object.keys(newMapState).forEach(key => {
       let val = newMapState[key]
       if (isObject(val) && isObject(initMapDispatch[key])) {
@@ -44,10 +44,16 @@ export default function connect (mapStateToProps, mapDispatchToProps) {
   }
 
   return function connectComponent (Component) {
+    // 将从redux而来的props从配置中剔除
+    const mapState = mapStateToProps(store.getState(), Component.defaultProps || {})
+    Component.properties && mapState && Object.keys(mapState).forEach(function (key) {
+      delete Component.properties[key]
+    })
+
     let unSubscribe = null
     return class Connect extends Component {
-      constructor () {
-        super(Object.assign(...arguments, mergeObjects(mapStateToProps(store.getState()), initMapDispatch)))
+      constructor (props) {
+        super(Object.assign(...arguments, mergeObjects(mapStateToProps(store.getState(), props), initMapDispatch)))
         Object.keys(initMapDispatch).forEach(key => {
           this[`__event_${key}`] = initMapDispatch[key]
         })
@@ -55,7 +61,7 @@ export default function connect (mapStateToProps, mapDispatchToProps) {
 
       componentWillMount () {
         const store = getStore()
-        Object.assign(this.props, mergeObjects(mapStateToProps(store.getState()), initMapDispatch))
+        Object.assign(this.props, mergeObjects(mapStateToProps(store.getState(), this.props), initMapDispatch))
         unSubscribe = store.subscribe(stateListener.bind(this))
         if (super.componentWillMount) {
           super.componentWillMount()

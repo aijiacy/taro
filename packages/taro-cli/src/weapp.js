@@ -24,6 +24,7 @@ const browserList = require('./config/browser_list')
 const defaultUglifyConfig = require('./config/uglify')
 const defaultBabelConfig = require('./config/babel')
 const defaultTSConfig = require('./config/tsconfig.json')
+const astConvert = require('./util/ast_convert')
 
 const appPath = process.cwd()
 const configDir = path.join(appPath, Util.PROJECT_CONFIG)
@@ -492,11 +493,11 @@ function parseAst (type, ast, depComponents, sourceFilePath, filePath, npmSkip =
                     if (defaultSpecifier) {
                       let objArr = [t.nullLiteral()]
                       if (Array.isArray(obj)) {
-                        objArr = convertArrayToAstExpression(obj)
+                        objArr = t.arrayExpression(astConvert.array(obj))
                       } else {
-                        objArr = convertObjectToAstExpression(obj)
+                        objArr = t.objectExpression(astConvert.obj(obj))
                       }
-                      astPath.replaceWith(t.variableDeclaration('const', [t.variableDeclarator(t.identifier(defaultSpecifier), t.objectExpression(objArr))]))
+                      astPath.replaceWith(t.variableDeclaration('const', [t.variableDeclarator(t.identifier(defaultSpecifier), objArr)]))
                     }
                   }
                 } else if (Util.REG_FONT.test(valueExtname) || Util.REG_IMAGE.test(valueExtname) || Util.REG_MEDIA.test(valueExtname)) {
@@ -624,9 +625,9 @@ function parseAst (type, ast, depComponents, sourceFilePath, filePath, npmSkip =
                       const obj = JSON.parse(fs.readFileSync(vpath).toString())
                       let objArr = [t.nullLiteral()]
                       if (Array.isArray(obj)) {
-                        objArr = convertArrayToAstExpression(obj)
+                        objArr = t.arrayExpression(astConvert.array(obj))
                       } else {
-                        objArr = convertObjectToAstExpression(obj)
+                        objArr = t.objectExpression(astConvert.obj(obj))
                       }
                       astPath.replaceWith(t.objectExpression(objArr))
                     }
@@ -704,7 +705,7 @@ function parseAst (type, ast, depComponents, sourceFilePath, filePath, npmSkip =
             node.body.push(template(`Taro.initPxTransform(${JSON.stringify(pxTransformConfig)})`, babylonConfig)())
             break
           case PARSE_AST_TYPE.PAGE:
-            node.body.push(template(`Page(require('${taroWeappFrameworkPath}').default.createComponent(${exportVariableName}, true))`, babylonConfig)())
+            node.body.push(template(`Component(require('${taroWeappFrameworkPath}').default.createComponent(${exportVariableName}, true))`, babylonConfig)())
             break
           case PARSE_AST_TYPE.COMPONENT:
             node.body.push(template(`Component(require('${taroWeappFrameworkPath}').default.createComponent(${exportVariableName}))`, babylonConfig)())
@@ -805,52 +806,51 @@ function parseComponentExportAst (ast, componentName, componentPath, componentTy
   return componentRealPath
 }
 
-function convertObjectToAstExpression (obj) {
-  const objArr = Object.keys(obj).map(key => {
-    const value = obj[key]
-    if (typeof value === 'string') {
-      return t.objectProperty(t.stringLiteral(key), t.stringLiteral(value))
-    }
-    if (typeof value === 'number') {
-      return t.objectProperty(t.stringLiteral(key), t.numericLiteral(value))
-    }
-    if (typeof value === 'boolean') {
-      return t.objectProperty(t.stringLiteral(key), t.booleanLiteral(value))
-    }
-    if (Array.isArray(value)) {
-      return t.objectProperty(t.stringLiteral(key), t.arrayExpression(convertArrayToAstExpression(value)))
-    }
-    if (value == null) {
-      return t.objectProperty(t.stringLiteral(key), t.nullLiteral())
-    }
-    if (typeof value === 'object') {
-      return t.objectProperty(t.stringLiteral(key), t.objectExpression(convertObjectToAstExpression(value)))
-    }
+function isFileToBeTaroComponent (code, sourcePath, outputPath) {
+  const transformResult = wxTransformer({
+    code,
+    sourcePath: sourcePath,
+    outputPath: outputPath,
+    isNormal: true,
+    isTyped: Util.REG_TYPESCRIPT.test(sourcePath)
   })
-  return objArr
-}
+  const { ast } = transformResult
+  let isTaroComponent = false
 
-function convertArrayToAstExpression (arr) {
-  return arr.map(value => {
-    if (typeof value === 'string') {
-      return t.stringLiteral(value)
-    }
-    if (typeof value === 'number') {
-      return t.numericLiteral(value)
-    }
-    if (typeof value === 'boolean') {
-      return t.booleanLiteral(value)
-    }
-    if (Array.isArray(value)) {
-      return convertArrayToAstExpression(value)
-    }
-    if (value == null) {
-      return t.nullLiteral()
-    }
-    if (typeof value === 'object') {
-      return t.objectExpression(convertObjectToAstExpression(value))
+  traverse(ast, {
+    ClassDeclaration (astPath) {
+      astPath.traverse({
+        ClassMethod (astPath) {
+          if (astPath.get('key').isIdentifier({ name: 'render' })) {
+            astPath.traverse({
+              JSXElement () {
+                isTaroComponent = true
+              }
+            })
+          }
+        }
+      })
+    },
+
+    ClassExpression (astPath) {
+      astPath.traverse({
+        ClassMethod (astPath) {
+          if (astPath.get('key').isIdentifier({ name: 'render' })) {
+            astPath.traverse({
+              JSXElement () {
+                isTaroComponent = true
+              }
+            })
+          }
+        }
+      })
     }
   })
+
+  return {
+    isTaroComponent,
+    transformResult
+  }
 }
 
 function isFileToBePage (filePath) {
@@ -1186,6 +1186,7 @@ async function buildSinglePage (page) {
     fileDep['media'] = res.mediaFiles
     dependencyTree[pageJs] = fileDep
   } catch (err) {
+    Util.printLog(Util.pocessTypeEnum.ERROR, '页面编译', `页面${pagePath}编译失败！`)
     console.log(err)
   }
 }
@@ -1313,7 +1314,7 @@ function buildUsingComponents (components, isComponent) {
   for (const component of components) {
     usingComponents[component.name] = component.path
   }
-  return Object.assign({}, isComponent ? { component: true } : {}, components.length ? {
+  return Object.assign({}, isComponent ? { component: true } : { usingComponents: {} }, components.length ? {
     usingComponents
   } : {})
 }
@@ -1327,6 +1328,14 @@ async function buildSingleComponent (componentObj, buildConfig = {}) {
     type: componentObj.type
   }
   const component = componentObj.path
+  if (!component) {
+    Util.printLog(Util.pocessTypeEnum.ERROR, '组件错误', `组件${_.upperFirst(_.camelCase(componentObj.name))}路径错误，请检查！（可能原因是导出的组件名不正确）`)
+    return {
+      js: null,
+      wxss: null,
+      wxml: null
+    }
+  }
   let componentShowPath = component.replace(appPath + path.sep, '')
   componentShowPath = componentShowPath.split(path.sep).join('/')
   let isComponentFromNodeModules = false
@@ -1350,20 +1359,9 @@ async function buildSingleComponent (componentObj, buildConfig = {}) {
     hasBeenBuiltComponents.push(component)
   }
   try {
-    let isTaroComponent = true
-    if (componentContent.indexOf(taroJsFramework) < 0 &&
-      componentContent.indexOf('render') < 0) {
-      isTaroComponent = false
-    }
-    const transformResult = wxTransformer({
-      code: componentContent,
-      sourcePath: component,
-      outputPath: outputComponentJSPath,
-      isRoot: false,
-      isTyped: Util.REG_TYPESCRIPT.test(component),
-      isNormal: !isTaroComponent
-    })
-    if (!isTaroComponent) {
+    let isTaroComponentRes = isFileToBeTaroComponent(componentContent, component, outputComponentJSPath)
+    if (!isTaroComponentRes.isTaroComponent) {
+      const transformResult = isTaroComponentRes.transformResult
       const componentRealPath = parseComponentExportAst(transformResult.ast, componentObj.name, component, componentObj.type)
       const realComponentObj = {
         path: componentRealPath,
@@ -1387,6 +1385,14 @@ async function buildSingleComponent (componentObj, buildConfig = {}) {
       }
       return await buildSingleComponent(realComponentObj, buildConfig)
     }
+    const transformResult = wxTransformer({
+      code: componentContent,
+      sourcePath: component,
+      outputPath: outputComponentJSPath,
+      isRoot: false,
+      isTyped: Util.REG_TYPESCRIPT.test(component),
+      isNormal: false
+    })
     const componentDepComponents = transformResult.components
     const res = parseAst(PARSE_AST_TYPE.COMPONENT, transformResult.ast, componentDepComponents, component, outputComponentJSPath, buildConfig.npmSkip)
     let resCode = res.code
@@ -1494,6 +1500,7 @@ async function buildSingleComponent (componentObj, buildConfig = {}) {
     }
     return componentsBuildResult[component]
   } catch (err) {
+    Util.printLog(Util.pocessTypeEnum.ERROR, '组件编译', `组件${componentShowPath}编译失败！`)
     console.log(err)
   }
 }
